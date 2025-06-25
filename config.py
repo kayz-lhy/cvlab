@@ -1,6 +1,7 @@
 import os
 from datetime import timedelta
 
+
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'your-secret-key-here'
 
@@ -14,7 +15,7 @@ class Config:
     REDIS_DB = int(os.environ.get('REDIS_DB') or 0)
 
     # MongoDB配置
-    MONGO_URI = os.environ.get('MONGO_URI') or 'mongodb://server:27017/cvlab'
+    MONGO_URI = os.environ.get('MONGO_URI') or 'mongodb://admin:admin@localhost:27017/cvlab?authSource=admin'
 
     # JWT配置
     JWT_SECRET_KEY = SECRET_KEY
@@ -29,18 +30,28 @@ class Config:
     UPLOAD_FOLDER = os.path.join(os.getcwd(), 'app/static/uploads')
     RESULTS_FOLDER = os.path.join(os.getcwd(), 'app/static/results')
 
+
 class DevelopmentConfig(Config):
     DEBUG = True
     # 开发环境允许所有域名
     CORS_ORIGINS = ["*"]
+    # 开发环境使用localhost而不是server
+    REDIS_HOST = 'server'
+    MONGO_URI = os.environ.get('MONGO_URI') or 'mongodb://admin:admin@server:27017/cvlab?authSource=admin'
+
 
 class ProductionConfig(Config):
     DEBUG = False
     # 生产环境只允许指定域名
     CORS_ORIGINS = [
         "https://yourdomain.com",
-        "https://www.yourdomain.com"
+        "https://www.yourdomain.com",
+        "*"
     ]
+    # 生产环境使用server
+    REDIS_HOST = 'server'
+    MONGO_URI = os.environ.get('MONGO_URI') or 'mongodb://admin:admin@server:27017/cvlab?authSource=admin'
+
 
 config = {
     'development': DevelopmentConfig,
