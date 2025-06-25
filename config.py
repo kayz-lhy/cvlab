@@ -10,7 +10,7 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # Redis配置
-    REDIS_HOST = os.environ.get('REDIS_HOST') or 'server'
+    REDIS_HOST = os.environ.get('REDIS_HOST') or 'localhost'
     REDIS_PORT = int(os.environ.get('REDIS_PORT') or 6379)
     REDIS_DB = int(os.environ.get('REDIS_DB') or 0)
 

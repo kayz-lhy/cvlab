@@ -18,9 +18,12 @@ matplotlib
 pandas
 PyYAML
 
-# MongoDB
-pymongo
+# YOLOv8 support (Ultralytics)
+ultralytics>=8.0.0
+
+# MongoDB with GridFS support
+pymongo>=4.0.0
+gridfs
 
 # Additional utilities
 colorlog
-ultralytics

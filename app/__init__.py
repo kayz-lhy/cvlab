@@ -35,9 +35,19 @@ def create_app(config_name='default'):
     # 初始化CORS
     CORS(app,
          origins=app.config.get('CORS_ORIGINS', ['*']),
-         allow_headers=['Content-Type', 'Authorization'],
+         allow_headers=[
+             'Content-Type',
+             'Authorization',
+             'X-Requested-With',
+             'Accept',
+             'Origin'
+         ],
          methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-         supports_credentials=True)
+         supports_credentials=True,
+         max_age=3600,  # OPTIONS预检请求缓存1小时
+         send_wildcard=False,  # 提高安全性
+         vary_header=True  # 添加Vary头
+         )
 
     # 初始化Redis
     init_redis(app)
@@ -45,16 +55,34 @@ def create_app(config_name='default'):
     # 初始化MongoDB
     mongodb.init_app(app)
 
-    # 初始化YOLO服务
+    # 初始化增强的YOLO服务（支持YOLOv5/v8切换和MongoDB权重管理）
     try:
-        from app.services.yolo_service import YOLOv5Service
-        yolo_service = YOLOv5Service(
+        from app.services.yolo_service import YOLOServiceV2
+        yolo_service = YOLOServiceV2(
             yolo_repo_path=app.config['YOLO_REPO_PATH'],
-            weights_path=app.config['YOLO_WEIGHTS_PATH']
+            weights_path=app.config['YOLO_WEIGHTS_PATH'],
+            mongodb_helper=mongodb
         )
         # 将YOLO服务存储在app实例中
         app.yolo_service = yolo_service
-        print("✅ YOLO服务初始化成功")
+        print("✅ 增强YOLO服务初始化成功")
+
+        # 尝试加载默认模型（如果MongoDB中有权重文件）
+        try:
+            weights_list = yolo_service.list_available_weights()
+            if weights_list:
+                # 尝试加载第一个可用的权重
+                default_weight = weights_list[0]
+                success, message = yolo_service.load_model_from_mongodb(default_weight['weight_id'])
+                if success:
+                    print(f"✅ 自动加载默认模型: {default_weight['model_name']} ({default_weight['model_type']})")
+                else:
+                    print(f"⚠️ 自动加载默认模型失败: {message}")
+            else:
+                print("📝 MongoDB中暂无权重文件，请先上传模型权重")
+        except Exception as auto_load_error:
+            print(f"⚠️ 自动加载模型时出错: {str(auto_load_error)}")
+
     except Exception as e:
         print(f"❌ YOLO服务初始化失败: {str(e)}")
         app.yolo_service = None
@@ -66,12 +94,20 @@ def create_app(config_name='default'):
     from app.routes import main_bp
     app.register_blueprint(main_bp)
 
-    # 注册检测相关蓝图
+    # 注册增强的检测相关蓝图
     try:
         from app.detection.routes import detection_bp
         app.register_blueprint(detection_bp)
-        print("✅ 检测蓝图注册成功")
+        print("✅ 增强检测蓝图注册成功")
     except Exception as e:
         print(f"❌ 检测蓝图注册失败: {str(e)}")
+
+    # 注册兼容性蓝图（保持前端兼容性）
+    try:
+        from app.detect_compat import detect_compat_bp
+        app.register_blueprint(detect_compat_bp)
+        print("✅ 兼容性蓝图注册成功")
+    except Exception as e:
+        print(f"❌ 兼容性蓝图注册失败: {str(e)}")
 
     return app
