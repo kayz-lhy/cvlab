@@ -140,7 +140,7 @@ class YOLOServiceV2:
             return {'success': False, 'error': f'上传权重文件失败: {str(e)}'}
 
     def _extract_model_info(self, weights_file_path: str) -> Dict[str, Any]:
-        """提取模型信息"""
+        """提取模型信息 - 改进版本"""
         try:
             checkpoint = torch.load(weights_file_path, map_location='cpu')
 
@@ -151,62 +151,83 @@ class YOLOServiceV2:
                 'architecture': 'unknown'
             }
 
-            # 提取类别信息 - 多种方式尝试
+            # 提取类别信息 - 多种方式尝试（使用独立的if而不是elif）
             classes_dict = None
 
+            print(f"🔍 开始分析权重文件结构...")
+            print(f"🔍 Checkpoint keys: {list(checkpoint.keys())}")
+
             # 方法1: 直接从checkpoint获取names
-            if 'names' in checkpoint:
+            if 'names' in checkpoint and checkpoint['names']:
                 classes_dict = checkpoint['names']
-                print(f"📝 从checkpoint['names']获取到类别: {len(classes_dict) if classes_dict else 0}")
+                print(f"✅ 方法1成功：从checkpoint['names']获取到 {len(classes_dict)} 个类别")
 
-            # 方法2: 从model.names获取
-            elif 'model' in checkpoint:
-                model = checkpoint['model']
-                if hasattr(model, 'names'):
-                    classes_dict = model.names
-                    print(f"📝 从model.names获取到类别: {len(classes_dict) if classes_dict else 0}")
-                elif hasattr(model, 'model') and hasattr(model.model, 'names'):
-                    classes_dict = model.model.names
-                    print(f"📝 从model.model.names获取到类别: {len(classes_dict) if classes_dict else 0}")
-
-            # 方法3: 从args中获取（某些模型格式）
+            # 方法2: 从model获取names
             if not classes_dict and 'model' in checkpoint:
-                if hasattr(checkpoint['model'], 'args') and hasattr(checkpoint['model'].args, 'data'):
+                model = checkpoint['model']
+                print(f"🔍 Model type: {type(model)}")
+                print(f"🔍 Model attributes: {[attr for attr in dir(model) if not attr.startswith('_')][:10]}...")
+
+                # 2a: 直接从model.names获取
+                if hasattr(model, 'names') and model.names:
+                    classes_dict = model.names
+                    print(f"✅ 方法2a成功：从model.names获取到 {len(classes_dict)} 个类别")
+
+                # 2b: 从model.model.names获取
+                elif hasattr(model, 'model') and hasattr(model.model, 'names') and model.model.names:
+                    classes_dict = model.model.names
+                    print(f"✅ 方法2b成功：从model.model.names获取到 {len(classes_dict)} 个类别")
+
+                # 2c: 从model[-1].names获取（某些YOLOv5版本）
+                elif hasattr(model, '__getitem__'):
                     try:
-                        import yaml
-                        data_path = checkpoint['model'].args.data
-                        if isinstance(data_path, str) and data_path.endswith('.yaml'):
-                            # 这里可以尝试读取yaml文件获取类别信息
-                            pass
+                        last_layer = model[-1]
+                        if hasattr(last_layer, 'names') and last_layer.names:
+                            classes_dict = last_layer.names
+                            print(f"✅ 方法2c成功：从model[-1].names获取到 {len(classes_dict)} 个类别")
                     except:
                         pass
 
-            # 如果没有找到类别信息，使用默认的COCO类别
+            # 方法3: 从训练参数中获取
+            if not classes_dict and 'train_args' in checkpoint:
+                train_args = checkpoint['train_args']
+                if hasattr(train_args, 'data') and train_args.data:
+                    try:
+                        # 尝试读取数据配置文件
+                        data_path = train_args.data
+                        if isinstance(data_path, str) and data_path.endswith('.yaml'):
+                            classes_dict = self._extract_classes_from_yaml(data_path)
+                            if classes_dict:
+                                print(f"✅ 方法3成功：从yaml文件获取到 {len(classes_dict)} 个类别")
+                    except Exception as e:
+                        print(f"⚠️ 从yaml文件提取类别失败: {str(e)}")
+
+            # 方法4: 从模型结构推断（针对标准数据集）
             if not classes_dict:
-                print("⚠️ 未找到类别信息，使用默认COCO 80类别")
-                # COCO数据集的80个类别
-                default_coco_classes = {
-                    0: 'person', 1: 'bicycle', 2: 'car', 3: 'motorcycle', 4: 'airplane',
-                    5: 'bus', 6: 'train', 7: 'truck', 8: 'boat', 9: 'traffic light',
-                    10: 'fire hydrant', 11: 'stop sign', 12: 'parking meter', 13: 'bench', 14: 'bird',
-                    15: 'cat', 16: 'dog', 17: 'horse', 18: 'sheep', 19: 'cow',
-                    20: 'elephant', 21: 'bear', 22: 'zebra', 23: 'giraffe', 24: 'backpack',
-                    25: 'umbrella', 26: 'handbag', 27: 'tie', 28: 'suitcase', 29: 'frisbee',
-                    30: 'skis', 31: 'snowboard', 32: 'sports ball', 33: 'kite', 34: 'baseball bat',
-                    35: 'baseball glove', 36: 'skateboard', 37: 'surfboard', 38: 'tennis racket', 39: 'bottle',
-                    40: 'wine glass', 41: 'cup', 42: 'fork', 43: 'knife', 44: 'spoon',
-                    45: 'bowl', 46: 'banana', 47: 'apple', 48: 'sandwich', 49: 'orange',
-                    50: 'broccoli', 51: 'carrot', 52: 'hot dog', 53: 'pizza', 54: 'donut',
-                    55: 'cake', 56: 'chair', 57: 'couch', 58: 'potted plant', 59: 'bed',
-                    60: 'dining table', 61: 'toilet', 62: 'tv', 63: 'laptop', 64: 'mouse',
-                    65: 'remote', 66: 'keyboard', 67: 'cell phone', 68: 'microwave', 69: 'oven',
-                    70: 'toaster', 71: 'sink', 72: 'refrigerator', 73: 'book', 74: 'clock',
-                    75: 'vase', 76: 'scissors', 77: 'teddy bear', 78: 'hair drier', 79: 'toothbrush'
-                }
-                classes_dict = default_coco_classes
+                classes_dict = self._infer_classes_from_model_structure(checkpoint)
+                if classes_dict:
+                    print(f"✅ 方法4成功：从模型结构推断到 {len(classes_dict)} 个类别")
+
+            # 方法5: 使用默认COCO类别
+            if not classes_dict:
+                print("⚠️ 所有方法都失败，使用默认COCO 80类别")
+                classes_dict = self._get_default_coco_classes()
 
             # 设置类别信息
             if classes_dict:
+                # 确保类别字典的格式正确（id: name）
+                if isinstance(classes_dict, dict):
+                    # 如果键不是整数，尝试转换
+                    if not all(isinstance(k, int) for k in classes_dict.keys()):
+                        try:
+                            classes_dict = {int(k): v for k, v in classes_dict.items()}
+                        except:
+                            # 如果转换失败，重新编号
+                            classes_dict = {i: v for i, v in enumerate(classes_dict.values())}
+                elif isinstance(classes_dict, list):
+                    # 如果是列表，转换为字典
+                    classes_dict = {i: name for i, name in enumerate(classes_dict)}
+
                 info['classes'] = classes_dict
                 info['class_count'] = len(classes_dict)
                 print(f"✅ 最终设置类别数量: {info['class_count']}")
@@ -214,42 +235,140 @@ class YOLOServiceV2:
             # 提取其他信息
             if 'model' in checkpoint:
                 model = checkpoint['model']
+
+                # 获取模型架构信息
                 if hasattr(model, 'yaml'):
                     try:
-                        yaml_info = str(model.yaml)
-                        info['architecture'] = yaml_info.get('backbone', 'unknown') if isinstance(yaml_info, dict) else 'unknown'
+                        yaml_info = model.yaml
+                        if isinstance(yaml_info, dict):
+                            info['architecture'] = yaml_info.get('backbone', 'unknown')
+                        else:
+                            info['architecture'] = str(yaml_info)[:50]  # 截取前50字符
                     except:
                         pass
+
+                # 获取stride信息
                 if hasattr(model, 'stride'):
-                    info['stride'] = model.stride
+                    try:
+                        info['stride'] = model.stride.tolist() if hasattr(model.stride, 'tolist') else model.stride
+                    except:
+                        pass
 
             return info
 
         except Exception as e:
             print(f"❌ 提取模型信息失败: {str(e)}")
+            import traceback
+            traceback.print_exc()
+
             # 返回默认的COCO类别信息
-            default_coco_classes = {
-                0: 'person', 1: 'bicycle', 2: 'car', 3: 'motorcycle', 4: 'airplane',
-                5: 'bus', 6: 'train', 7: 'truck', 8: 'boat', 9: 'traffic light',
-                10: 'fire hydrant', 11: 'stop sign', 12: 'parking meter', 13: 'bench', 14: 'bird',
-                15: 'cat', 16: 'dog', 17: 'horse', 18: 'sheep', 19: 'cow',
-                20: 'elephant', 21: 'bear', 22: 'zebra', 23: 'giraffe', 24: 'backpack',
-                25: 'umbrella', 26: 'handbag', 27: 'tie', 28: 'suitcase', 29: 'frisbee',
-                30: 'skis', 31: 'snowboard', 32: 'sports ball', 33: 'kite', 34: 'baseball bat',
-                35: 'baseball glove', 36: 'skateboard', 37: 'surfboard', 38: 'tennis racket', 39: 'bottle',
-                40: 'wine glass', 41: 'cup', 42: 'fork', 43: 'knife', 44: 'spoon',
-                45: 'bowl', 46: 'banana', 47: 'apple', 48: 'sandwich', 49: 'orange',
-                50: 'broccoli', 51: 'carrot', 52: 'hot dog', 53: 'pizza', 54: 'donut',
-                55: 'cake', 56: 'chair', 57: 'couch', 58: 'potted plant', 59: 'bed',
-                60: 'dining table', 61: 'toilet', 62: 'tv', 63: 'laptop', 64: 'mouse',
-                65: 'remote', 66: 'keyboard', 67: 'cell phone', 68: 'microwave', 69: 'oven',
-                70: 'toaster', 71: 'sink', 72: 'refrigerator', 73: 'book', 74: 'clock',
-                75: 'vase', 76: 'scissors', 77: 'teddy bear', 78: 'hair drier', 79: 'toothbrush'
-            }
+            default_classes = self._get_default_coco_classes()
             return {
-                'classes': default_coco_classes,
-                'class_count': len(default_coco_classes)
+                'classes': default_classes,
+                'class_count': len(default_classes),
+                'extraction_error': str(e)
             }
+
+    def _extract_classes_from_yaml(self, yaml_path: str) -> Optional[Dict[int, str]]:
+        """从YAML文件提取类别信息"""
+        try:
+            import yaml
+
+            # 如果是相对路径，尝试在多个位置查找
+            search_paths = [
+                yaml_path,
+                os.path.join(os.getcwd(), yaml_path),
+                os.path.join(self.yolo_repo_path, yaml_path),
+                os.path.join(self.yolo_repo_path, 'data', os.path.basename(yaml_path))
+            ]
+
+            for path in search_paths:
+                if os.path.exists(path):
+                    with open(path, 'r', encoding='utf-8') as f:
+                        data = yaml.safe_load(f)
+
+                    if 'names' in data:
+                        names = data['names']
+                        if isinstance(names, list):
+                            return {i: name for i, name in enumerate(names)}
+                        elif isinstance(names, dict):
+                            return names
+                    break
+
+            return None
+        except Exception as e:
+            print(f"从YAML文件提取类别失败: {str(e)}")
+            return None
+
+    def _infer_classes_from_model_structure(self, checkpoint: Dict) -> Optional[Dict[int, str]]:
+        """从模型结构推断类别信息"""
+        try:
+            # 尝试从模型的输出层推断类别数量
+            if 'model' in checkpoint:
+                model = checkpoint['model']
+
+                # 查找输出层的类别数量
+                class_count = None
+
+                # 方法1: 查找最后一层的输出维度
+                if hasattr(model, 'model') and len(model.model) > 0:
+                    try:
+                        last_layer = model.model[-1]
+                        if hasattr(last_layer, 'nc'):
+                            class_count = last_layer.nc
+                        elif hasattr(last_layer, 'anchors') and hasattr(last_layer, 'no'):
+                            # YOLOv5的Detect层
+                            class_count = last_layer.no - 5  # no = nc + 5 (x,y,w,h,conf)
+                    except:
+                        pass
+
+                # 方法2: 从state_dict推断
+                if not class_count and hasattr(model, 'state_dict'):
+                    try:
+                        state_dict = model.state_dict()
+                        for key, tensor in state_dict.items():
+                            if 'head' in key.lower() or 'classifier' in key.lower():
+                                if tensor.dim() >= 2:
+                                    class_count = tensor.shape[0]
+                                    break
+                    except:
+                        pass
+
+                # 根据推断的类别数量返回对应的标准数据集类别
+                if class_count:
+                    if class_count == 80:
+                        return self._get_default_coco_classes()
+                    elif class_count == 1:
+                        return {0: 'object'}
+                    elif class_count <= 20:
+                        # 可能是自定义的小数据集
+                        return {i: f'class_{i}' for i in range(class_count)}
+
+            return None
+        except Exception as e:
+            print(f"从模型结构推断类别失败: {str(e)}")
+            return None
+
+    def _get_default_coco_classes(self) -> Dict[int, str]:
+        """获取默认的COCO数据集类别"""
+        return {
+            0: 'person', 1: 'bicycle', 2: 'car', 3: 'motorcycle', 4: 'airplane',
+            5: 'bus', 6: 'train', 7: 'truck', 8: 'boat', 9: 'traffic light',
+            10: 'fire hydrant', 11: 'stop sign', 12: 'parking meter', 13: 'bench', 14: 'bird',
+            15: 'cat', 16: 'dog', 17: 'horse', 18: 'sheep', 19: 'cow',
+            20: 'elephant', 21: 'bear', 22: 'zebra', 23: 'giraffe', 24: 'backpack',
+            25: 'umbrella', 26: 'handbag', 27: 'tie', 28: 'suitcase', 29: 'frisbee',
+            30: 'skis', 31: 'snowboard', 32: 'sports ball', 33: 'kite', 34: 'baseball bat',
+            35: 'baseball glove', 36: 'skateboard', 37: 'surfboard', 38: 'tennis racket', 39: 'bottle',
+            40: 'wine glass', 41: 'cup', 42: 'fork', 43: 'knife', 44: 'spoon',
+            45: 'bowl', 46: 'banana', 47: 'apple', 48: 'sandwich', 49: 'orange',
+            50: 'broccoli', 51: 'carrot', 52: 'hot dog', 53: 'pizza', 54: 'donut',
+            55: 'cake', 56: 'chair', 57: 'couch', 58: 'potted plant', 59: 'bed',
+            60: 'dining table', 61: 'toilet', 62: 'tv', 63: 'laptop', 64: 'mouse',
+            65: 'remote', 66: 'keyboard', 67: 'cell phone', 68: 'microwave', 69: 'oven',
+            70: 'toaster', 71: 'sink', 72: 'refrigerator', 73: 'book', 74: 'clock',
+            75: 'vase', 76: 'scissors', 77: 'teddy bear', 78: 'hair drier', 79: 'toothbrush'
+        }
 
     def load_model_from_mongodb(self, weight_id: str) -> Tuple[bool, str]:
         """从MongoDB加载模型"""
@@ -283,6 +402,17 @@ class YOLOServiceV2:
                     'class_count': weight_record.get('model_info', {}).get('class_count', 0)
                 }
 
+                # 如果MongoDB中的类别信息为空或错误，尝试从实际加载的模型中获取
+                if self.current_weights_info['class_count'] == 0:
+                    print("⚠️ MongoDB中类别信息为空，尝试从加载的模型获取...")
+                    model_classes = self._get_classes_from_loaded_model()
+                    if model_classes:
+                        self.current_weights_info['classes'] = model_classes
+                        self.current_weights_info['class_count'] = len(model_classes)
+
+                        # 更新MongoDB中的记录
+                        self._update_mongodb_class_info(weight_id, model_classes)
+
             # 清理临时文件
             try:
                 os.remove(temp_weights_path)
@@ -293,6 +423,63 @@ class YOLOServiceV2:
 
         except Exception as e:
             return False, f"从MongoDB加载模型失败: {str(e)}"
+
+    def _get_classes_from_loaded_model(self) -> Optional[Dict[int, str]]:
+        """从已加载的模型获取类别信息"""
+        try:
+            if not self.model:
+                return None
+
+            model_classes = None
+
+            if self.current_model_type == ModelType.YOLOV8:
+                # YOLOv8模型
+                if hasattr(self.model, 'names'):
+                    model_classes = self.model.names
+            else:
+                # YOLOv5模型
+                if hasattr(self.model, 'names'):
+                    model_classes = self.model.names
+                elif hasattr(self.model, 'model') and hasattr(self.model.model, 'names'):
+                    model_classes = self.model.model.names
+
+            # 格式化类别信息
+            if model_classes:
+                if isinstance(model_classes, list):
+                    return {i: name for i, name in enumerate(model_classes)}
+                elif isinstance(model_classes, dict):
+                    # 确保键是整数
+                    formatted_classes = {}
+                    for k, v in model_classes.items():
+                        try:
+                            formatted_classes[int(k)] = str(v)
+                        except:
+                            continue
+                    return formatted_classes if formatted_classes else None
+
+            return None
+
+        except Exception as e:
+            print(f"从加载的模型获取类别信息失败: {str(e)}")
+            return None
+
+    def _update_mongodb_class_info(self, weight_id: str, classes: Dict[int, str]):
+        """更新MongoDB中的类别信息"""
+        try:
+            update_data = {
+                'model_info.classes': classes,
+                'model_info.class_count': len(classes),
+                'model_info.updated_at': datetime.utcnow()
+            }
+
+            success = self.mongodb.update_weight_info(weight_id, update_data)
+            if success:
+                print(f"✅ 已更新MongoDB中权重 {weight_id} 的类别信息: {len(classes)} 个类别")
+            else:
+                print(f"⚠️ 更新MongoDB中权重 {weight_id} 的类别信息失败")
+
+        except Exception as e:
+            print(f"更新MongoDB类别信息失败: {str(e)}")
 
     def _load_model_by_type(self, weights_path: str, model_type: ModelType) -> Tuple[bool, str]:
         """根据模型类型加载模型"""
@@ -417,6 +604,9 @@ class YOLOServiceV2:
             results = self.model(image_path, conf=conf_threshold, verbose=False)
             detections = []
 
+            # 获取类别名称
+            class_names = self._get_current_class_names()
+
             for result in results:
                 boxes = result.boxes
                 if boxes is not None:
@@ -426,9 +616,12 @@ class YOLOServiceV2:
                         cls = int(box.cls[0].cpu().numpy())
 
                         if conf >= conf_threshold:
+                            # 获取类别名称
+                            class_name = class_names.get(cls, f'class_{cls}')
+
                             detection = {
                                 'class_id': cls,
-                                'class_name': self.model.names[cls],
+                                'class_name': class_name,
                                 'confidence': round(float(conf), 3),
                                 'bbox': [int(x1), int(y1), int(x2), int(y2)]
                             }
@@ -447,13 +640,20 @@ class YOLOServiceV2:
             results.conf = conf_threshold
 
             detections = []
+
+            # 获取类别名称
+            class_names = self._get_current_class_names()
+
             df = results.pandas().xyxy[0]
 
             for index, row in df.iterrows():
                 if row['confidence'] >= conf_threshold:
+                    cls = int(row['class'])
+                    class_name = class_names.get(cls, row.get('name', f'class_{cls}'))
+
                     detection = {
-                        'class_id': int(row['class']),
-                        'class_name': row['name'],
+                        'class_id': cls,
+                        'class_name': class_name,
                         'confidence': round(float(row['confidence']), 3),
                         'bbox': [
                             int(row['xmin']),
@@ -469,6 +669,25 @@ class YOLOServiceV2:
         except Exception as e:
             print(f"YOLOv5检测失败: {str(e)}")
             return []
+
+    def _get_current_class_names(self) -> Dict[int, str]:
+        """获取当前模型的类别名称"""
+        try:
+            # 优先从current_weights_info获取
+            if self.current_weights_info and self.current_weights_info.get('classes'):
+                return self.current_weights_info['classes']
+
+            # 然后从实际加载的模型获取
+            model_classes = self._get_classes_from_loaded_model()
+            if model_classes:
+                return model_classes
+
+            # 最后使用默认COCO类别
+            return self._get_default_coco_classes()
+
+        except Exception as e:
+            print(f"获取类别名称失败: {str(e)}")
+            return self._get_default_coco_classes()
 
     def _generate_yolov8_result_image(self, image_path: str, conf_threshold: float) -> Tuple[Optional[str], Optional[str]]:
         """生成YOLOv8结果图片"""
@@ -559,24 +778,47 @@ class YOLOServiceV2:
             return None
 
     def get_model_info(self) -> Dict[str, Any]:
-        """获取当前模型信息"""
-        if not self.model or not self.current_weights_info:
+        """获取当前模型信息 - 改进版本"""
+        if not self.model:
             return {'loaded': False}
 
         try:
+            # 首先尝试从实际加载的模型获取类别信息
+            model_classes = self._get_classes_from_loaded_model()
+
+            # 如果从模型获取到了类别信息，使用它；否则使用存储的信息
+            if model_classes:
+                classes_dict = model_classes
+                class_source = 'live_model'
+            else:
+                classes_dict = self.current_weights_info.get('classes', {}) if self.current_weights_info else {}
+                class_source = 'stored_info'
+
+            # 如果还是没有类别信息，使用默认COCO类别
+            if not classes_dict:
+                classes_dict = self._get_default_coco_classes()
+                class_source = 'default_coco'
+
             return {
                 'loaded': True,
-                'weight_id': self.current_weights_info.get('weight_id'),
-                'model_name': self.current_weights_info.get('model_name'),
+                'weight_id': self.current_weights_info.get('weight_id') if self.current_weights_info else None,
+                'model_name': self.current_weights_info.get('model_name') if self.current_weights_info else 'unknown',
                 'model_type': self.current_model_type.value if self.current_model_type else 'unknown',
-                'description': self.current_weights_info.get('description', ''),
+                'description': self.current_weights_info.get('description', '') if self.current_weights_info else '',
                 'device': str(self.device),
-                'classes': self.current_weights_info.get('classes', {}),
-                'class_count': self.current_weights_info.get('class_count', 0)
+                'classes': classes_dict,
+                'class_count': len(classes_dict),
+                'class_source': class_source
             }
+
         except Exception as e:
             print(f"获取模型信息失败: {str(e)}")
-            return {'loaded': False, 'error': str(e)}
+            return {
+                'loaded': False,
+                'error': str(e),
+                'fallback_classes': self._get_default_coco_classes(),
+                'fallback_class_count': 80
+            }
 
     def list_available_weights(self) -> List[Dict[str, Any]]:
         """列出MongoDB中可用的权重文件"""
@@ -606,7 +848,7 @@ class YOLOServiceV2:
                     'description': weight.get('description', ''),
                     'file_size': weight['file_size'],
                     'upload_time': weight['upload_time'].isoformat() if weight.get('upload_time') else None,
-                    'class_count': class_count,  # 确保这个字段有值
+                    'class_count': class_count,
                     'is_active': weight.get('is_active', True),
                     'is_current': (self.current_weights_info and
                                    self.current_weights_info.get('weight_id') == weight['weight_id'])
@@ -651,3 +893,274 @@ class YOLOServiceV2:
         # 重新加载当前权重，但使用新的模型类型
         weight_id = self.current_weights_info['weight_id']
         return self.load_model_from_mongodb(weight_id)
+
+    def debug_weight_file_structure(self, weights_file_path: str) -> Dict[str, Any]:
+        """调试权重文件结构的详细信息"""
+        try:
+            checkpoint = torch.load(weights_file_path, map_location='cpu')
+
+            debug_info = {
+                'file_path': weights_file_path,
+                'file_size': os.path.getsize(weights_file_path),
+                'checkpoint_keys': list(checkpoint.keys()),
+                'model_analysis': {},
+                'names_locations': [],
+                'potential_class_info': []
+            }
+
+            print(f"🔍 调试权重文件: {weights_file_path}")
+            print(f"🔍 文件大小: {debug_info['file_size'] / (1024*1024):.2f} MB")
+            print(f"🔍 主要键: {debug_info['checkpoint_keys']}")
+
+            # 分析每个主要键的内容
+            for key in checkpoint.keys():
+                try:
+                    value = checkpoint[key]
+                    key_info = {
+                        'type': type(value).__name__,
+                        'size': len(value) if hasattr(value, '__len__') else 'N/A'
+                    }
+
+                    # 特别检查names相关信息
+                    if 'names' in key.lower():
+                        key_info['content'] = value
+                        debug_info['names_locations'].append({
+                            'location': key,
+                            'content': value,
+                            'type': type(value).__name__
+                        })
+
+                    debug_info[f'key_{key}'] = key_info
+
+                except Exception as e:
+                    debug_info[f'key_{key}'] = {'error': str(e)}
+
+            # 深度分析model键
+            if 'model' in checkpoint:
+                model = checkpoint['model']
+                model_info = {
+                    'type': type(model).__name__,
+                    'attributes': [attr for attr in dir(model) if not attr.startswith('_')][:20],
+                    'has_names': hasattr(model, 'names'),
+                    'names_content': getattr(model, 'names', None) if hasattr(model, 'names') else None
+                }
+
+                # 检查model.model
+                if hasattr(model, 'model'):
+                    model_info['has_model_attr'] = True
+                    model_info['model_type'] = type(model.model).__name__
+                    model_info['model_has_names'] = hasattr(model.model, 'names')
+                    model_info['model_names_content'] = getattr(model.model, 'names', None) if hasattr(model.model, 'names') else None
+
+                    # 检查model.model的各层
+                    if hasattr(model.model, '__iter__'):
+                        try:
+                            layers_info = []
+                            for i, layer in enumerate(model.model):
+                                layer_info = {
+                                    'index': i,
+                                    'type': type(layer).__name__,
+                                    'has_names': hasattr(layer, 'names'),
+                                    'has_nc': hasattr(layer, 'nc'),
+                                    'has_anchors': hasattr(layer, 'anchors')
+                                }
+                                if hasattr(layer, 'names'):
+                                    layer_info['names'] = layer.names
+                                if hasattr(layer, 'nc'):
+                                    layer_info['nc'] = layer.nc
+                                layers_info.append(layer_info)
+                            model_info['layers'] = layers_info[-5:]  # 只保留最后5层
+                        except:
+                            pass
+
+                debug_info['model_analysis'] = model_info
+
+            # 搜索所有可能包含类别信息的位置
+            def search_names_recursive(obj, path=""):
+                try:
+                    if hasattr(obj, 'names') and obj.names:
+                        debug_info['potential_class_info'].append({
+                            'path': path + '.names',
+                            'content': obj.names,
+                            'type': type(obj.names).__name__
+                        })
+
+                    # 搜索字典类型的对象
+                    if isinstance(obj, dict):
+                        for k, v in obj.items():
+                            if 'names' in str(k).lower():
+                                debug_info['potential_class_info'].append({
+                                    'path': f"{path}['{k}']",
+                                    'content': v,
+                                    'type': type(v).__name__
+                                })
+                            if hasattr(v, '__dict__') and len(path.split('.')) < 3:  # 限制递归深度
+                                search_names_recursive(v, f"{path}['{k}']")
+
+                    # 搜索有__dict__属性的对象
+                    elif hasattr(obj, '__dict__') and len(path.split('.')) < 3:
+                        for attr_name in dir(obj):
+                            if not attr_name.startswith('_'):
+                                try:
+                                    attr_value = getattr(obj, attr_name)
+                                    if 'names' in attr_name.lower() or hasattr(attr_value, 'names'):
+                                        search_names_recursive(attr_value, f"{path}.{attr_name}")
+                                except:
+                                    pass
+                except:
+                    pass
+
+            # 执行递归搜索
+            search_names_recursive(checkpoint, "checkpoint")
+
+            return debug_info
+
+        except Exception as e:
+            return {
+                'error': f"调试失败: {str(e)}",
+                'file_path': weights_file_path
+            }
+
+    def debug_mongodb_weight_structure(self, weight_id: str) -> Dict[str, Any]:
+        """调试MongoDB中权重文件结构"""
+        try:
+            # 从MongoDB获取权重记录
+            weight_record = self.mongodb.get_weight_by_id(weight_id)
+            if not weight_record:
+                return {'error': '权重记录不存在'}
+
+            # 将权重数据写入临时文件
+            temp_weights_path = os.path.join(self.weights_path, f"debug_{weight_id}.pt")
+            os.makedirs(os.path.dirname(temp_weights_path), exist_ok=True)
+
+            with open(temp_weights_path, 'wb') as f:
+                f.write(weight_record['weights_data'])
+
+            # 调试权重文件结构
+            debug_info = self.debug_weight_file_structure(temp_weights_path)
+
+            # 添加MongoDB记录信息
+            debug_info['mongodb_record'] = {
+                'weight_id': weight_record['weight_id'],
+                'model_name': weight_record['model_name'],
+                'model_type': weight_record['model_type'],
+                'file_size': weight_record['file_size'],
+                'stored_class_count': weight_record.get('model_info', {}).get('class_count', 0),
+                'stored_classes': weight_record.get('model_info', {}).get('classes', {}),
+                'upload_time': weight_record['upload_time'].isoformat() if weight_record.get('upload_time') else None
+            }
+
+            # 清理临时文件
+            try:
+                os.remove(temp_weights_path)
+            except:
+                pass
+
+            return debug_info
+
+        except Exception as e:
+            return {'error': f'调试MongoDB权重结构失败: {str(e)}'}
+
+    def repair_all_weights_class_info(self) -> Dict[str, Any]:
+        """修复所有权重文件的类别信息"""
+        try:
+            weights_list = self.mongodb.list_weight_files()
+            repair_results = {
+                'total_weights': len(weights_list),
+                'repaired_count': 0,
+                'failed_count': 0,
+                'details': []
+            }
+
+            for weight in weights_list:
+                weight_id = weight['weight_id']
+                model_name = weight['model_name']
+
+                try:
+                    print(f"🔧 检查权重: {model_name} ({weight_id})")
+
+                    # 检查是否需要修复
+                    current_class_count = weight.get('model_info', {}).get('class_count', 0)
+
+                    if current_class_count == 0:
+                        print(f"🔧 需要修复权重: {model_name}")
+
+                        # 从MongoDB获取完整记录（包含二进制数据）
+                        weight_record = self.mongodb.get_weight_by_id(weight_id)
+                        if not weight_record:
+                            continue
+
+                        # 写入临时文件
+                        temp_path = os.path.join(self.weights_path, f"repair_{weight_id}.pt")
+                        with open(temp_path, 'wb') as f:
+                            f.write(weight_record['weights_data'])
+
+                        # 重新提取模型信息
+                        new_model_info = self._extract_model_info(temp_path)
+
+                        # 更新数据库
+                        if new_model_info['class_count'] > 0:
+                            success = self.mongodb.update_weight_info(weight_id, {
+                                'model_info': new_model_info
+                            })
+
+                            if success:
+                                repair_results['repaired_count'] += 1
+                                repair_results['details'].append({
+                                    'weight_id': weight_id,
+                                    'model_name': model_name,
+                                    'status': 'repaired',
+                                    'old_class_count': current_class_count,
+                                    'new_class_count': new_model_info['class_count']
+                                })
+                                print(f"✅ 修复成功: {model_name}, 类别数: {new_model_info['class_count']}")
+                            else:
+                                repair_results['failed_count'] += 1
+                                repair_results['details'].append({
+                                    'weight_id': weight_id,
+                                    'model_name': model_name,
+                                    'status': 'update_failed',
+                                    'error': '更新数据库失败'
+                                })
+                        else:
+                            repair_results['failed_count'] += 1
+                            repair_results['details'].append({
+                                'weight_id': weight_id,
+                                'model_name': model_name,
+                                'status': 'extraction_failed',
+                                'error': '无法提取类别信息'
+                            })
+
+                        # 清理临时文件
+                        try:
+                            os.remove(temp_path)
+                        except:
+                            pass
+
+                    else:
+                        repair_results['details'].append({
+                            'weight_id': weight_id,
+                            'model_name': model_name,
+                            'status': 'no_repair_needed',
+                            'class_count': current_class_count
+                        })
+
+                except Exception as e:
+                    repair_results['failed_count'] += 1
+                    repair_results['details'].append({
+                        'weight_id': weight_id,
+                        'model_name': model_name,
+                        'status': 'error',
+                        'error': str(e)
+                    })
+                    print(f"❌ 修复失败: {model_name}, 错误: {str(e)}")
+
+            return repair_results
+
+        except Exception as e:
+            return {
+                'error': f'批量修复失败: {str(e)}',
+                'total_weights': 0,
+                'repaired_count': 0,
+                'failed_count': 0
+            }
