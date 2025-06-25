@@ -26,13 +26,24 @@ class JWTHelper:
 
             # 检查token是否在Redis中存在
             stored_token = redis_client.get(f"token:{user_id}")
-            if not stored_token or stored_token.decode() != token:
+            if not stored_token:
+                return None
+
+            # 如果Redis配置了decode_responses=True，stored_token已经是字符串
+            # 否则需要decode
+            if isinstance(stored_token, bytes):
+                stored_token = stored_token.decode()
+
+            if stored_token != token:
                 return None
 
             return user_id
         except jwt.ExpiredSignatureError:
             return None
         except jwt.InvalidTokenError:
+            return None
+        except Exception as e:
+            print(f"Token验证错误: {str(e)}")
             return None
 
     @staticmethod

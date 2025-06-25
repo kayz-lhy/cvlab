@@ -5,11 +5,11 @@ class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'your-secret-key-here'
 
     # 数据库配置
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///app.db'
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'postgresql://postgre:987654@101.43.142.153:5432/cvlab'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # Redis配置
-    REDIS_HOST = os.environ.get('REDIS_HOST') or 'localhost'
+    REDIS_HOST = os.environ.get('REDIS_HOST') or 'server'
     REDIS_PORT = int(os.environ.get('REDIS_PORT') or 6379)
     REDIS_DB = int(os.environ.get('REDIS_DB') or 0)
 

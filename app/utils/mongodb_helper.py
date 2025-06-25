@@ -23,8 +23,6 @@ class MongoDBHelper:
 
     def save_detection_record(self, user_id, detection_data):
         """保存检测记录到MongoDB"""
-        if not self.db:
-            return None
 
         try:
             record = {
