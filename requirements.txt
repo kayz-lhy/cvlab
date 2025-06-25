@@ -5,3 +5,30 @@ Flask-CORS==4.0.0
 PyJWT==2.8.0
 redis==5.0.1
 Werkzeug==2.3.7
+
+# YOLOv5 dependencies
+torch>=1.7.0
+torchvision>=0.8.1
+opencv-python
+Pillow
+numpy
+matplotlib
+pandas
+PyYAML
+
+# MongoDB
+pymongo
+
+# YOLOv5 dependencies
+torch>=1.7.0
+torchvision>=0.8.1
+opencv-python
+Pillow
+numpy
+matplotlib
+pandas
+PyYAML
+
+# MongoDB
+pymongo
+flask-pymongo

@@ -52,3 +52,7 @@ echo "2. 创建虚拟环境: python -m venv venv"
 echo "3. 激活虚拟环境: source venv/bin/activate (Linux/Mac) 或 venv\\Scripts\\activate (Windows)"
 echo "4. 安装Flask: pip install flask"
 echo "5. 开始开发你的Flask应用！"
+
+
+
+ SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'postgresql://postgre:987654@101.43.142.153:5432/cvlab'
