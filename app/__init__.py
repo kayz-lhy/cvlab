@@ -87,12 +87,21 @@ def create_app(config_name='default'):
         print(f"❌ YOLO服务初始化失败: {str(e)}")
         app.yolo_service = None
 
-    # 注册蓝图
+    # 注册认证蓝图
     from app.auth.routes import auth_bp
     app.register_blueprint(auth_bp)
 
+    # 注册主路由蓝图
     from app.routes import main_bp
     app.register_blueprint(main_bp)
+
+    # 注册用户管理蓝图
+    try:
+        from app.user_management.routes import user_mgmt_bp
+        app.register_blueprint(user_mgmt_bp)
+        print("✅ 用户管理蓝图注册成功")
+    except Exception as e:
+        print(f"❌ 用户管理蓝图注册失败: {str(e)}")
 
     # 注册增强的检测相关蓝图
     try:
@@ -110,4 +119,52 @@ def create_app(config_name='default'):
     except Exception as e:
         print(f"❌ 兼容性蓝图注册失败: {str(e)}")
 
+    # 创建数据库表和默认管理员
+    with app.app_context():
+        try:
+            # 创建所有表
+            db.create_all()
+            print("✅ 数据库表创建成功")
+
+            # 创建默认管理员账户（如果不存在）
+            create_default_admin()
+
+        except Exception as e:
+            print(f"❌ 数据库初始化失败: {str(e)}")
+
     return app
+
+def create_default_admin():
+    """创建默认管理员账户"""
+    try:
+        from app.models import User, UserRole
+
+        # 检查是否已有管理员
+        admin_exists = User.query.filter_by(role=UserRole.ADMIN).first()
+
+        if not admin_exists:
+            # 创建默认管理员
+            admin = User(
+                username='admin',
+                email='admin@cvlab.com',
+                full_name='系统管理员',
+                role=UserRole.ADMIN,
+                is_active=True
+            )
+            admin.set_password('admin123')  # 默认密码
+
+            db.session.add(admin)
+            db.session.commit()
+
+            print("✅ 默认管理员账户创建成功")
+            print("📝 管理员登录信息: username=admin, password=admin123")
+            print("⚠️ 请在首次登录后立即修改默认密码")
+        else:
+            print("✅ 管理员账户已存在")
+
+    except Exception as e:
+        print(f"❌ 创建默认管理员失败: {str(e)}")
+        try:
+            db.session.rollback()
+        except:
+            pass

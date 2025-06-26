@@ -9,10 +9,11 @@ class Config:
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'postgresql://postgre:987654@101.43.142.153:5432/cvlab'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # Redis配置
+    # Redis配置 - 默认使用localhost
     REDIS_HOST = os.environ.get('REDIS_HOST') or 'localhost'
     REDIS_PORT = int(os.environ.get('REDIS_PORT') or 6379)
     REDIS_DB = int(os.environ.get('REDIS_DB') or 0)
+    REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD') or None  # Redis密码（可选）
 
     # MongoDB配置
     MONGO_URI = os.environ.get('MONGO_URI') or 'mongodb://admin:admin@localhost:27017/cvlab?authSource=admin'
@@ -36,8 +37,9 @@ class DevelopmentConfig(Config):
     # 开发环境允许所有域名
     CORS_ORIGINS = ["*"]
     # 开发环境使用localhost而不是server
-    REDIS_HOST = 'server'
-    MONGO_URI = os.environ.get('MONGO_URI') or 'mongodb://admin:admin@server:27017/cvlab?authSource=admin'
+    # 开发环境使用localhost
+    REDIS_HOST = os.environ.get('REDIS_HOST') or 'localhost'
+    MONGO_URI = os.environ.get('MONGO_URI') or 'mongodb://admin:admin@localhost:27017/cvlab?authSource=admin'
 
 
 class ProductionConfig(Config):
@@ -49,8 +51,8 @@ class ProductionConfig(Config):
         "*"
     ]
     # 生产环境使用server
-    REDIS_HOST = 'server'
-    MONGO_URI = os.environ.get('MONGO_URI') or 'mongodb://admin:admin@server:27017/cvlab?authSource=admin'
+    REDIS_HOST = 'localhost'
+    MONGO_URI = os.environ.get('MONGO_URI') or 'mongodb://admin:admin@localhost:27017/cvlab?authSource=admin'
 
 
 config = {
